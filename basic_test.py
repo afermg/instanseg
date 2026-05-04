@@ -11,7 +11,14 @@ Expected output:
     type and shape of process() result
 """
 
+import importlib.util
+import os
 import sys
+
+# Drop the repo root from sys.path BEFORE importing instanseg — otherwise
+# the in-tree `instanseg/` source dir shadows the nix-built package.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path[:] = [p for p in sys.path if os.path.abspath(p) not in {_HERE, ""}]
 
 # server.py reads sys.argv[1] at import time; inject a placeholder so
 # importing it from this file doesn't crash.
@@ -20,7 +27,12 @@ if len(sys.argv) < 2:
 
 import numpy  # noqa: E402
 
-from server import setup  # noqa: E402
+# Load `server.py` directly via importlib so we never need to put _HERE back
+# on sys.path (which would re-trigger the instanseg source-dir shadow).
+_spec = importlib.util.spec_from_file_location("server", os.path.join(_HERE, "server.py"))
+server = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(server)
+setup = server.setup
 
 
 def main() -> None:
