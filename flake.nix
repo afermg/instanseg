@@ -38,6 +38,10 @@
             runServer = pkgs.writeScriptBin "runserver.sh" ''
               #!${pkgs.bash}/bin/bash
               export PYTHONUNBUFFERED=1
+              # PYTHONSAFEPATH=1 (Python 3.11+) keeps Python from prepending
+              # the script's directory to sys.path so the in-tree `instanseg/`
+              # source tree never shadows the nix-built package.
+              export PYTHONSAFEPATH=1
               # InstanSeg downloads weights via pkgutil + writes them next to
               # the package by default. Inside the nix store that path is
               # read-only, so redirect to a writable cache directory.
@@ -77,7 +81,11 @@
                 pkgs.cudaPackages.cudnn
               ];
               shellHook = ''
-                export PYTHONPATH=${python_with_pkgs}/${python_with_pkgs.sitePackages}
+                # PYTHONSAFEPATH=1 (Python 3.11+) keeps Python from prepending
+                # the script's directory to sys.path so `python basic_test.py`
+                # never picks up the in-tree `instanseg/` source tree instead
+                # of the nix-built package.
+                export PYTHONSAFEPATH=1
               '';
             };
         };
