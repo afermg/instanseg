@@ -1,7 +1,7 @@
 """
-This example uses a server within the environment defined on `https://github.com/afermg/instanseg.git`.
+This example uses a server within the environment defined on `https://github.com/afermg/instanseg.git` (default branch: `nahual-wrap`).
 
-Run `nix run github:afermg/instanseg/nahual-wrap -- ipc:///tmp/instanseg.ipc` from any directory,
+Run `nix run github:afermg/instanseg -- ipc:///tmp/instanseg.ipc` from any directory,
 or `nix run --impure .#default -- ipc:///tmp/instanseg.ipc` from the root of that repository.
 """
 
