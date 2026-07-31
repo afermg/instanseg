@@ -40,7 +40,7 @@ _DEFAULT_EXPECTED_CHANNELS = {
 
 def setup(
     model_id: str = "brightfield_nuclei",
-    device: int | str | None = 0,
+    device: int | str | None = None,
     image_reader: str = "skimage.io",
     verbosity: int = 1,
     expected_channels: int | None = None,
@@ -63,15 +63,17 @@ def setup(
     verbosity : int
         InstanSeg verbosity (0/1/2).
     """
-    # Resolve device: prefer the requested CUDA index, else fall back.
-    if isinstance(device, int) and torch.cuda.is_available():
-        torch_device_str = f"cuda:{int(device)}"
-    elif isinstance(device, str) and device:
-        torch_device_str = device
-    elif torch.cuda.is_available():
-        torch_device_str = "cuda:0"
+    if device is None:
+        torch_device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    elif isinstance(device, int):
+        torch_device = torch.device(f"cuda:{device}")
     else:
-        torch_device_str = "cpu"
+        torch_device = torch.device(device)
+    if torch_device.type == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError(
+            f"CUDA device {torch_device} was requested but CUDA is unavailable"
+        )
+    torch_device_str = str(torch_device)
 
     model = InstanSeg(
         model_type=model_id,
@@ -120,17 +122,19 @@ def process(
         Shape ``(N, H, W)`` with int32 instance labels (0 = background).
     """
     if pixels.ndim != 5:
-        raise ValueError(
-            f"Expected NCZYX (5D) array, got shape {pixels.shape}"
-        )
+        raise ValueError(f"Expected NCZYX (5D) array, got shape {pixels.shape}")
 
     n, c, z, h, w = pixels.shape
     # Squeeze Z (InstanSeg is 2-D); take the first plane.
     chw_batch = pixels[:, :, 0, :, :]  # (N, C, H, W)
 
     # Pad channel dim if the model expects more channels than provided
-    # (e.g. brightfield_nuclei wants 3). If the input already has >=
-    # expected_channels we pass it through unchanged.
+    # (e.g. brightfield_nuclei wants 3), and reject extra channels rather
+    # than failing later inside the network.
+    if expected_channels is not None and chw_batch.shape[1] > expected_channels:
+        raise ValueError(
+            f"Expected at most {expected_channels} channels, got {chw_batch.shape[1]}"
+        )
     if expected_channels is not None and chw_batch.shape[1] < expected_channels:
         pad_c = expected_channels - chw_batch.shape[1]
         pad = numpy.zeros((n, pad_c, h, w), dtype=chw_batch.dtype)

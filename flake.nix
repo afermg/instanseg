@@ -8,87 +8,76 @@
     nahual-flake.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs =
-    {
-      self,
-      nixpkgs,
-      flake-utils,
-      systems,
-      ...
-    }@inputs:
+  outputs = {
+    self,
+    nixpkgs,
+    flake-utils,
+    ...
+  } @ inputs:
     flake-utils.lib.eachDefaultSystem (
-      system:
-      let
+      system: let
         pkgs = import nixpkgs {
-          system = system;
+          inherit system;
           config = {
             allowUnfree = true;
             cudaSupport = true;
           };
         };
+        instanseg = pkgs.python3.pkgs.callPackage ./nix/instanseg.nix {};
+        python_with_pkgs = pkgs.python3.withPackages (pp: [
+          inputs.nahual-flake.packages.${system}.nahual
+          instanseg
+        ]);
+        runServer = pkgs.writeScriptBin "nahual-instanseg" ''
+          #!${pkgs.bash}/bin/bash
+          export PYTHONSAFEPATH=1
+          : "''${INSTANSEG_BIOIMAGEIO_PATH:=''${XDG_CACHE_HOME:-$HOME/.cache}/instanseg/bioimageio_models}"
+          export INSTANSEG_BIOIMAGEIO_PATH
+          mkdir -p "$INSTANSEG_BIOIMAGEIO_PATH"
+          exec ${python_with_pkgs}/bin/python ${self}/server.py \
+            "''${1:-tcp://0.0.0.0:5555}"
+        '';
+        instansegApp = {
+          type = "app";
+          program = "${runServer}/bin/nahual-instanseg";
+        };
       in
-      with pkgs;
-      rec {
-        apps.default =
-          let
-            python_with_pkgs = python3.withPackages (pp: [
-              (inputs.nahual-flake.packages.${system}.nahual)
-              packages.instanseg
-            ]);
-            runServer = pkgs.writeScriptBin "runserver.sh" ''
-              #!${pkgs.bash}/bin/bash
-              export PYTHONUNBUFFERED=1
-              # PYTHONSAFEPATH=1 (Python 3.11+) keeps Python from prepending
-              # the script's directory to sys.path so the in-tree `instanseg/`
-              # source tree never shadows the nix-built package.
+        with pkgs; rec {
+          packages =
+            {inherit instanseg;}
+            // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+              oci-image = import ./nix/oci-image.nix {
+                inherit pkgs;
+                name = "instanseg";
+                title = "Nahual InstanSeg";
+                description = "InstanSeg instance segmentation served through Nahual";
+                source = "https://github.com/afermg/instanseg";
+                revision = self.rev or self.dirtyRev or "unknown";
+                server = runServer;
+                entrypoint = instansegApp.program;
+              };
+            };
+          inherit python_with_pkgs;
+          formatter = pkgs.alejandra;
+          scripts.runServer = runServer;
+          apps = rec {
+            instanseg = instansegApp;
+            default = instanseg;
+          };
+          devShells.default = mkShell {
+            packages = [
+              python_with_pkgs
+              pkgs.cudaPackages.cudatoolkit
+              pkgs.cudaPackages.cudnn
+              python3Packages.tifffile
+              python3Packages.pyyaml
+            ];
+            shellHook = ''
               export PYTHONSAFEPATH=1
-              # InstanSeg downloads weights via pkgutil + writes them next to
-              # the package by default. Inside the nix store that path is
-              # read-only, so redirect to a writable cache directory.
               : "''${INSTANSEG_BIOIMAGEIO_PATH:=''${XDG_CACHE_HOME:-$HOME/.cache}/instanseg/bioimageio_models}"
               export INSTANSEG_BIOIMAGEIO_PATH
-              mkdir -p "$INSTANSEG_BIOIMAGEIO_PATH"
-              ${python_with_pkgs}/bin/python ${self}/server.py ''${@:-"ipc:///tmp/instanseg.ipc"}
             '';
-          in
-          {
-            type = "app";
-            program = "${runServer}/bin/runserver.sh";
           };
-
-        formatter = pkgs.alejandra;
-
-        packages = {
-          instanseg = pkgs.python3.pkgs.callPackage ./nix/instanseg.nix { };
-        };
-
-        devShells = {
-          default =
-            let
-              python_with_pkgs = (
-                python3.withPackages (pp: [
-                  (inputs.nahual-flake.packages.${system}.nahual)
-                  packages.instanseg
-                  pp.tifffile
-                  pp.pyyaml
-                ])
-              );
-            in
-            mkShell {
-              packages = [
-                python_with_pkgs
-                pkgs.cudaPackages.cudatoolkit
-                pkgs.cudaPackages.cudnn
-              ];
-              shellHook = ''
-                # PYTHONSAFEPATH=1 (Python 3.11+) keeps Python from prepending
-                # the script's directory to sys.path so `python basic_test.py`
-                # never picks up the in-tree `instanseg/` source tree instead
-                # of the nix-built package.
-                export PYTHONSAFEPATH=1
-              '';
-            };
-        };
-      }
+        }
     );
 }
