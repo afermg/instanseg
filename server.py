@@ -100,6 +100,7 @@ def setup(
     return processor, info
 
 
+@torch.inference_mode()
 def process(
     pixels: numpy.ndarray,
     model: InstanSeg,
@@ -164,7 +165,7 @@ def process(
 
 
 async def main():
-    with pynng.Rep0(listen=address, recv_timeout=300) as sock:
+    with pynng.Rep0(listen=address, recv_timeout=300_000) as sock:
         print(f"InstanSeg server listening on {address}", flush=True)
         async with trio.open_nursery() as nursery:
             nursery.start_soon(partial(responder, setup=setup), sock)
